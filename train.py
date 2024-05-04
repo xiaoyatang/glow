@@ -13,7 +13,7 @@ from torchvision import datasets, transforms, utils
 
 from model import Glow
 from convert_RGB_to_H_or_E_prostate import convert_RGB_to_H_or_E
-
+os.environ['CUDA_VISIBLE_DEVICES']='0,1'
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 parser = argparse.ArgumentParser(description="Glow trainer")
@@ -33,10 +33,10 @@ parser.add_argument(
 ) #refer to section3.1 in paper. Actnorm layer performs an affine transformation of the activations using a scale and bias per channel, similar to BN.
 parser.add_argument("--n_bits", default=5, type=int, help="number of bits")
 parser.add_argument("--lr", default=1e-4, type=float, help="learning rate")
-parser.add_argument("--img_size", default=224, type=int, help="image size")#64
+parser.add_argument("--img_size", default=400, type=int, help="image size")#224
 parser.add_argument("--temp", default=0.7, type=float, help="temperature of sampling")
 parser.add_argument("--n_sample", default=20, type=int, help="number of samples")
-parser.add_argument("--path", metavar="PATH", type=str, help="Path to image directory")
+parser.add_argument("--path", default="PATH",metavar="PATH", type=str, help="Path to image directory")
 
 
 def sample_data(path, batch_size, image_size=400):
@@ -101,6 +101,8 @@ def MSEloss(tarImgH,tarImgE,z1_outs):
     z1_E = z1_E[:,:tarImgH.size(2)*tarImgH.size(1)]
     tarImgH = torch.reshape(tarImgH, (tarImgH.size(0), -1))
     tarImgE = torch.reshape(tarImgE, (tarImgE.size(0), -1))
+    # z1_H,z1_E = convert_RGB_to_H_or_E(z1_outs[:2],'./Test_set_256x256_H_my_code',\
+    #         './Test_set_256x256_E_my_code',args.batch,args.img_size)
     mse_loss = torch.nn.functional.mse_loss(z1_H,tarImgH)+torch.nn.functional.mse_loss(z1_E,tarImgE)
     return mse_loss,z1_H,z1_E
 
@@ -121,7 +123,9 @@ def train(args, model, optimizer):
             oriImg = 255*image.clone().detach() #float32 [B,3,224,224] scale to original pixel value
             tarImgH,tarImgE = convert_RGB_to_H_or_E(oriImg,'./Test_set_256x256_H_my_code',\
             './Test_set_256x256_E_my_code',image.size(0),image.size(-1))
-            image = image * 255
+            norm_min = image.min()
+            norm_max = image.max()
+            image = (image-norm_min)/(norm_max-norm_min) * 255
 
             if args.n_bits < 8:  #noise
                 image = torch.floor(image / 2 ** (8 - args.n_bits))
@@ -143,8 +147,18 @@ def train(args, model, optimizer):
             logdet = logdet.mean()
 
             loss, log_p, log_det = calc_loss(log_p, logdet, args.img_size, n_bins) #loss: sum loss; log_p: log p(z); log_det: sum(log(det|w|))
+            # with torch.no_grad():
+            #     generated_samples = model_single.reverse(z_sample)
+                # utils.save_image(
+                #         generated_samples.cpu().data,
+                #         f"./sample/{str(i + 1).zfill(6)}.png",
+                #         normalize=True,
+                #         nrow=10,
+                #         range=(-0.5, 0.5),
+                #     )
+            # mseLoss,z1_H,z1_E = MSEloss(tarImgH,tarImgE,generated_samples)
             mseLoss,z1_H,z1_E = MSEloss(tarImgH,tarImgE,z1_outs[0])
-            loss += mseLoss
+            loss += 0.00001* mseLoss
             model.zero_grad()
             loss.backward() #do bp on sumLoss
             # warmup_lr = args.lr * min(1, i * batch_size / (50000 * 10))
@@ -155,8 +169,11 @@ def train(args, model, optimizer):
             pbar.set_description(
                 f"Loss: {loss.item():.5f}; mseLoss:{mseLoss.item():.5f};logP: {log_p.item():.5f}; logdet: {log_det.item():.5f}; lr: {warmup_lr:.7f}"
             )
+            # pbar.set_description(
+            #     f"Loss: {loss.item():.5f}; logP: {log_p.item():.5f}; logdet: {log_det.item():.5f}; lr: {warmup_lr:.7f}"
+            # )
 
-            if i % 10000 == 0: #save image per 100 iters 问题是只保存前200个epochs
+            if i % 100 == 0: #save image per 100 iters 问题是只保存前200个epochs
                 with torch.no_grad():
                     z1_H = torch.reshape(z1_H, (z1_H.size(0), 1, 400, 400))
                     z1_E = torch.reshape(z1_E, (z1_E.size(0), 1, 400, 400))
@@ -174,16 +191,17 @@ def train(args, model, optimizer):
                         pil_image_Etar.save(tar_E_path)
                         #save H&E 
                         pil_image_H = to_pil_image(z1_H[i])
-                        file_H_path = os.path.join('./Test_set_400X400_H_my_code/class1', filename)
+                        file_H_path = os.path.join('./Test_set_400X400_H_my_code/class2', filename)
                         pil_image_H.save(file_H_path)
                         pil_image_E = to_pil_image(z1_E[i])
                         filename = f'imageE_{i}.png'
-                        file_E_path = os.path.join('./Test_set_400X400_H_my_code/class1', filename)
+                        file_E_path = os.path.join('./Test_set_400X400_H_my_code/class2', filename)
                         pil_image_E.save(file_E_path)
                         #save generated views
                     utils.save_image(
                         model_single.reverse(z_sample).cpu().data,
-                        f"./sample/{str(i + 1).zfill(6)}.png",
+                        # generated_samples.cpu().data,
+                        f"./sample/alpha1eminus4/{str(i + 1).zfill(6)}.png",
                         normalize=True,
                         nrow=10,
                         range=(-0.5, 0.5),

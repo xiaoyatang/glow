@@ -39,7 +39,7 @@ def convert_RGB_to_H_or_E(oriImg,target_H_main_folder, target_E_main_folder,bact
         
         
         # img_H = Image.fromarray(np.squeeze(gray_image_H.cpu().numpy().astype(np.uint8),axis=2)) #224,224
-        # img_H.save(os.path.join(target_H_main_folder,sub_folder_index))
+        # # img_H.save(os.path.join(target_H_main_folder,sub_folder_index))
         # img_H.save(target_H_main_folder)
 
         # img_E = Image.fromarray(np.squeeze(gray_image_E.cpu().numpy().astype(np.uint8),axis=2))
